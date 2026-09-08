@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../main.dart' show inboxServer;
 import '../models/feed_source.dart';
 import '../models/web_page_info.dart';
+import '../services/ima_service.dart';
 import '../services/obsidian_store.dart';
 import '../services/source_store.dart';
 import '../widgets/source_webview.dart';
@@ -27,6 +28,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _store = SourceStore();
   final _obsidianStore = ObsidianStore();
+  final _imaService = ImaService();
 
   List<FeedSource> _sources = [];
   bool _loading = true;
@@ -210,6 +212,10 @@ class _HomeScreenState extends State<HomeScreen> {
         enriched,
         sourceTitle: source.title,
       );
+
+      // 异步同步到 ima 知识库（不阻塞 Obsidian 收藏反馈）
+      _syncToIma(enriched, source.title);
+
       if (mounted) {
         final hasHtml = html != null && html.isNotEmpty;
         final dirPath = files.first.parent.path;
@@ -232,6 +238,60 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// 异步同步收藏内容到 ima 知识库。
+  Future<void> _syncToIma(WebPageInfo info, String sourceTitle) async {
+    try {
+      final enabled = await _imaService.getEnabled();
+      if (!enabled) return;
+      final configured = await _imaService.isConfigured();
+      if (!configured) return;
+
+      // 构建 Markdown 内容
+      final now = DateTime.now();
+      final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final sb = StringBuffer();
+      sb.writeln('---');
+      sb.writeln('title: "${info.title.replaceAll('"', "'")}"');
+      sb.writeln('source: "$sourceTitle"');
+      sb.writeln('url: "${info.url}"');
+      sb.writeln('saved: "$dateStr"');
+      sb.writeln('tags: [fluxio, inbox]');
+      sb.writeln('---');
+      sb.writeln();
+      sb.writeln('# ${info.title}');
+      sb.writeln();
+      sb.writeln('> 来源：[$sourceTitle](${info.url})');
+      sb.writeln('> 收藏时间：$dateStr');
+      sb.writeln();
+      if (info.content != null && info.content!.isNotEmpty) {
+        sb.writeln(info.content);
+      } else {
+        sb.writeln('（正文提取失败，仅收藏链接）');
+      }
+
+      final fileName = '${dateStr}-${_sanitizeFileName(info.title)}.md';
+      final result = await _imaService.uploadMarkdown(
+        fileName: fileName,
+        content: sb.toString(),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.success ? 'ima：${result.message}' : 'ima 同步失败：${result.message}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      // ima 同步失败不影响主流程，静默处理
+    }
+  }
+
+  String _sanitizeFileName(String name) {
+    final clean = name.replaceAll(RegExp(r'[\\/:*?"<>|\s]+'), '_');
+    return clean.substring(0, clean.length > 50 ? 50 : clean.length);
   }
 
   /// 当前 Tab 的 WebView 回到信息流首页（保留之前浏览位置）。
