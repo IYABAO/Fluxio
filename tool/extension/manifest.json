@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Fluxio 收藏助手",
+  "version": "1.0.0",
+  "description": "一键把当前网页投递到 Fluxio 收件箱，自动保存 Markdown 到 Obsidian。",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "action": {
+    "default_title": "收藏到 Fluxio",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

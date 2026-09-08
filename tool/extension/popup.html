@@ -1,0 +1,28 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body { width: 280px; margin: 0; font-family: system-ui, sans-serif; }
+    .wrap { padding: 16px; }
+    h3 { margin: 0 0 12px; font-size: 14px; }
+    #status { font-size: 12px; color: #888; margin-bottom: 12px; min-height: 16px; }
+    #btn { width: 100%; padding: 10px; border: 0; border-radius: 6px;
+           background: #00897b; color: #fff; font-size: 14px; cursor: pointer; }
+    #btn:disabled { opacity: .6; cursor: default; }
+    #result { margin-top: 12px; font-size: 12px; line-height: 1.6;
+              word-break: break-all; }
+    .ok { color: #2e7d32; }
+    .err { color: #c62828; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h3>📥 Fluxio 收藏助手</h3>
+    <div id="status">检查服务连接中…</div>
+    <button id="btn">收藏当前页到 Obsidian</button>
+    <div id="result"></div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
