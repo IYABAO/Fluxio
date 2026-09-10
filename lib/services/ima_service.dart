@@ -82,19 +82,19 @@ class ImaService {
   }
 
   Future<List<ImaKnowledgeBase>> _fetchKnowledgeBases(String clientId, String apiKey) async {
-    final uri = Uri.parse('$_baseUrl/knowledge_base/list');
+    final uri = Uri.parse('$_baseUrl/search_knowledge_base');
     final client = HttpClient();
     try {
       final req = await client.postUrl(uri);
       _headers(clientId, apiKey).forEach((k, v) => req.headers.add(k, v));
-      req.add(utf8.encode(jsonEncode({'page': 1, 'page_size': 50})));
+      req.add(utf8.encode(jsonEncode({'query': '', 'cursor': '', 'limit': 50})));
       final resp = await req.close();
       final body = await resp.transform(utf8.decoder).join();
       final data = jsonDecode(body);
       if (data['code'] != 0 && data['code'] != 200) {
         throw Exception('${data['message'] ?? data['msg'] ?? '未知错误'} (code=${data['code']})');
       }
-      final list = (data['data']?['list'] ?? data['data']?['knowledge_bases'] ?? []) as List;
+      final list = (data['data']?['info_list'] ?? data['data']?['list'] ?? []) as List;
       return list.map((e) => ImaKnowledgeBase.fromJson(e as Map<String, dynamic>)).toList();
     } finally {
       client.close();
@@ -163,8 +163,8 @@ class ImaKnowledgeBase {
 
   factory ImaKnowledgeBase.fromJson(Map<String, dynamic> json) {
     return ImaKnowledgeBase(
-      id: (json['id'] ?? json['knowledge_base_id'] ?? '').toString(),
-      name: (json['name'] ?? json['title'] ?? '未命名').toString(),
+      id: (json['kb_id'] ?? json['id'] ?? json['knowledge_base_id'] ?? '').toString(),
+      name: (json['kb_name'] ?? json['name'] ?? json['title'] ?? '未命名').toString(),
       description: json['description']?.toString(),
     );
   }
