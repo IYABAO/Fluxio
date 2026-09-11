@@ -241,6 +241,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// 异步同步收藏内容到 ima 知识库。
+  ///
+  /// 优先使用 importUrls（ima 自动抓取网页内容，质量更好），
+  /// URL 无效时回退到 uploadMarkdown（上传本地提取的 Markdown）。
   Future<void> _syncToIma(WebPageInfo info, String sourceTitle) async {
     try {
       final enabled = await _imaService.getEnabled();
@@ -248,7 +251,24 @@ class _HomeScreenState extends State<HomeScreen> {
       final configured = await _imaService.isConfigured();
       if (!configured) return;
 
-      // 构建 Markdown 内容
+      // 优先用 URL 导入（ima 自动抓取完整网页内容）
+      final url = info.url.trim();
+      final isValidUrl = url.startsWith('http://') || url.startsWith('https://');
+
+      if (isValidUrl) {
+        final result = await _imaService.importUrls(urls: [url]);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result.success ? 'ima：${result.message}' : 'ima 同步失败：${result.message}'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+
+      // URL 无效时回退到上传 Markdown
       final now = DateTime.now();
       final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
       final sb = StringBuffer();

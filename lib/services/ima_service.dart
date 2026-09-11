@@ -151,6 +151,62 @@ class ImaService {
       return (success: false, message: '同步失败：$e');
     }
   }
+
+  /// 通过 URL 导入网页到知识库（适合网页收藏，ima 自动抓取内容）。
+  ///
+  /// 返回 (success, message)
+  Future<({bool success, String message})> importUrls({
+    required List<String> urls,
+    String? knowledgeBaseId,
+  }) async {
+    final clientId = await getClientId();
+    final apiKey = await getApiKey();
+    final kbId = knowledgeBaseId ?? await getKnowledgeBaseId();
+    if (clientId == null || clientId.isEmpty) {
+      return (success: false, message: '未配置 Client ID');
+    }
+    if (apiKey == null || apiKey.isEmpty) {
+      return (success: false, message: '未配置 API Key');
+    }
+    if (kbId == null || kbId.isEmpty) {
+      return (success: false, message: '未选择知识库');
+    }
+    if (urls.isEmpty) {
+      return (success: false, message: 'URL 列表为空');
+    }
+
+    try {
+      final uri = Uri.parse('$_baseUrl/import_urls');
+      final client = HttpClient();
+      try {
+        final req = await client.postUrl(uri);
+        _headers(clientId, apiKey).forEach((k, v) => req.headers.add(k, v));
+        final payload = {
+          'knowledge_base_id': kbId,
+          'urls': urls,
+        };
+        req.add(utf8.encode(jsonEncode(payload)));
+        final resp = await req.close();
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data['code'] != 0 && data['code'] != 200) {
+          return (success: false, message: '${data['message'] ?? data['msg'] ?? '导入失败'} (code=${data['code']})');
+        }
+        final results = data['data']?['results'] as Map<String, dynamic>?;
+        if (results != null) {
+          final failed = results.entries.where((e) => (e.value['ret_code'] ?? 0) != 0).toList();
+          if (failed.isNotEmpty) {
+            return (success: false, message: '${failed.length} 个 URL 导入失败: ${failed.first.value['errmsg'] ?? '未知错误'}');
+          }
+        }
+        return (success: true, message: '已导入 ${urls.length} 个网页到 ima 知识库');
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      return (success: false, message: '导入失败：$e');
+    }
+  }
 }
 
 /// ima 知识库模型。
