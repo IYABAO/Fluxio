@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../main.dart' show inboxServer;
+import '../main.dart' show inboxServer, shareReceiver;
 import '../models/clip_record.dart';
 import '../models/feed_source.dart';
 import '../models/web_page_info.dart';
 import '../services/clip_history_store.dart';
+import '../services/clipboard_detector.dart';
 import '../services/ima_service.dart';
+import '../services/ios_share_bridge.dart';
 import '../services/obsidian_store.dart';
 import '../services/source_store.dart';
 import '../widgets/source_webview.dart';
@@ -53,17 +55,141 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _lastClipboard;
   bool _clipboardPromptVisible = false;
 
+  /// 分享接收订阅。
+  StreamSubscription<ShareEvent>? _shareSubscription;
+  StreamSubscription<SharedUrl>? _iosShareSubscription;
+
   @override
   void initState() {
     super.initState();
     _reload();
     _startClipboardWatch();
+    _initShareReceiver();
   }
 
   @override
   void dispose() {
     _clipboardTimer?.cancel();
+    _shareSubscription?.cancel();
+    _iosShareSubscription?.cancel();
     super.dispose();
+  }
+
+  /// 初始化分享接收（Share Extension + URL Scheme + 剪贴板）。
+  void _initShareReceiver() {
+    // 监听分享事件流
+    _shareSubscription = shareReceiver.shareStream.listen((event) {
+      if (!mounted) return;
+      _handleShareEvent(event);
+    });
+
+    // iOS 专属：监听 URL Scheme / Share Extension 分享
+    _iosShareSubscription = IosShareBridge.shareStream.listen((shared) {
+      if (!mounted) return;
+      // 直接走收藏逻辑（Share Extension / URL Scheme 不需要确认）
+      shareReceiver.handleShare(
+        shared.url,
+        title: shared.title,
+        source: shared.source,
+        showConfirmation: false,
+      );
+    });
+
+    // App 启动时检查 App Group 中的待处理分享
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      IosShareBridge.checkForNewShares();
+    });
+  }
+
+  /// 处理分享事件。
+  void _handleShareEvent(ShareEvent event) {
+    switch (event.status) {
+      case ShareStatus.received:
+        // 收到分享（需要确认时显示对话框）
+        if (event.needsConfirmation) {
+          _showShareConfirmationDialog(event);
+        }
+        break;
+      case ShareStatus.processing:
+        // 收藏处理中
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('📥 正在收藏：${event.title ?? event.url}'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        break;
+      case ShareStatus.success:
+        // 收藏成功
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ ${event.message ?? '收藏成功'}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        break;
+      case ShareStatus.failed:
+        // 收藏失败
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ ${event.message ?? '收藏失败'}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+        break;
+    }
+  }
+
+  /// 显示分享确认对话框（剪贴板检测时用）。
+  void _showShareConfirmationDialog(ShareEvent event) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('📥 检测到链接'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (event.title != null && event.title!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  event.title!,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            Text(
+              event.url,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            const Text('是否收藏到 Fluxio？'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              shareReceiver.cancelShare(event.url);
+            },
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              shareReceiver.confirmShare(
+                event.url,
+                title: event.title,
+                source: event.source,
+              );
+            },
+            child: const Text('收藏'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 每 2 秒看一次剪贴板：出现新的 http(s) 链接 → 弹条「收藏到 Fluxio？」。

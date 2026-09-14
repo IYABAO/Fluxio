@@ -5,6 +5,7 @@ import 'package:webview_flutter_windows/webview_windows.dart';
 
 import 'screens/home_screen.dart';
 import 'services/inbox_server.dart';
+import 'services/share_receiver_service.dart';
 
 /// 自定义的 WebView2 用户数据目录（规避默认 profile 权限/损坏问题）。
 const String kFluxioWebView2UserData =
@@ -12,6 +13,9 @@ const String kFluxioWebView2UserData =
 
 /// 全局收件服务单例（设置页与主页共用）。
 final InboxServer inboxServer = InboxServer();
+
+/// 全局分享接收服务单例（Share Extension + 剪贴板检测）。
+final ShareReceiverService shareReceiver = ShareReceiverService();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +34,8 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('InboxServer start failed: $e');
   }
+  // 初始化分享接收服务（Share Extension + 剪贴板检测）。
+  shareReceiver.init();
   runApp(const FluxioApp());
 }
 
