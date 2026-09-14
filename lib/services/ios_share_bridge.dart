@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// iOS 原生分享接收桥接（处理 Share Extension + URL Scheme）。
 ///

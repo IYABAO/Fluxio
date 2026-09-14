@@ -12,6 +12,7 @@ import '../services/clipboard_detector.dart';
 import '../services/ima_service.dart';
 import '../services/ios_share_bridge.dart';
 import '../services/obsidian_store.dart';
+import '../services/share_receiver_service.dart';
 import '../services/source_store.dart';
 import '../widgets/source_webview.dart';
 import 'clipboard_history_screen.dart';

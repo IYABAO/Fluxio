@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'obsidian_store.dart';
 import 'ima_service.dart';
-import 'web_content_extractor.dart';
 import '../models/web_page_info.dart';
 import '../models/clip_record.dart';
 import 'clip_history_store.dart';
@@ -15,7 +14,7 @@ import 'clip_history_store.dart';
 /// 功能：
 /// - 接收来自 Share Extension 的分享 URL（通过 App Group 或 URL Scheme）
 /// - 接收来自剪贴板检测的 URL
-/// - 统一走收藏逻辑（提取正文 → 保存 Obsidian → 上传 ima）
+/// - 统一走收藏逻辑（保存 Obsidian → 上传 ima）
 /// - 后台静默执行，不阻塞 UI
 /// - 收藏历史记录
 class ShareReceiverService {
@@ -23,7 +22,6 @@ class ShareReceiverService {
 
   final ObsidianStore _obsidianStore = ObsidianStore();
   final ImaService _imaService = ImaService();
-  final WebContentExtractor _extractor = WebContentExtractor();
   final ClipHistoryStore _historyStore = ClipHistoryStore();
 
   /// 流控制器：当有新的分享内容时通知 UI。
@@ -40,7 +38,8 @@ class ShareReceiverService {
         final url = call.arguments['url'] as String?;
         final title = call.arguments['title'] as String?;
         if (url != null && url.isNotEmpty) {
-          _handleShare(url, title: title, source: 'share_extension');
+          // 直接后台收藏（Share Extension 不需要确认）
+          await _executeShare(url, title: title, source: 'share_extension');
         }
       }
       return null;
@@ -65,6 +64,7 @@ class ShareReceiverService {
         url: url,
         title: title,
         source: source,
+        status: ShareStatus.received,
         needsConfirmation: true,
       ));
     } else {
@@ -100,7 +100,7 @@ class ShareReceiverService {
       createdAt: DateTime.now(),
       status: 'pending',
     );
-    await _historyStore.addRecord(record);
+    await _historyStore.add(record);
 
     // 2. 通知 UI：收藏开始
     _shareController.add(ShareEvent(
@@ -111,19 +111,14 @@ class ShareReceiverService {
     ));
 
     try {
-      // 3. 提取网页内容
-      WebPageInfo? info;
-      try {
-        info = await _extractor.extract(url);
-      } catch (e) {
-        // 提取失败，用基本信息
-        info = WebPageInfo(
-          url: url,
-          title: title ?? url,
-          content: '',
-          html: '',
-        );
-      }
+      // 3. 构建 WebPageInfo（分享的 URL 暂时只保存链接，不提取正文）
+      // 后续可以优化：用 http 请求获取网页正文
+      final info = WebPageInfo(
+        url: url,
+        title: title ?? url,
+        content: '',
+        html: '',
+      );
 
       // 4. 保存到 Obsidian（如果配置了）
       String? obsidianPath;
@@ -134,7 +129,9 @@ class ShareReceiverService {
             info,
             sourceTitle: title ?? '分享收藏',
           );
-          obsidianPath = files.first.path;
+          if (files.isNotEmpty) {
+            obsidianPath = files.first.path;
+          }
         }
       } catch (e) {
         // Obsidian 保存失败不影响 ima
@@ -144,11 +141,12 @@ class ShareReceiverService {
       bool imaSuccess = false;
       try {
         if (await _imaService.isConfigured()) {
-          imaSuccess = await _imaService.uploadDocument(
+          final result = await _imaService.uploadMarkdown(
             title: info.title,
-            content: info.content,
+            content: '来源：$url\n\n${info.content}',
             sourceUrl: url,
           );
+          imaSuccess = result.success;
         }
       } catch (e) {
         // ima 上传失败
@@ -159,8 +157,8 @@ class ShareReceiverService {
       await _historyStore.updateStatus(
         record.id,
         success ? 'success' : 'failed',
-        obsidianPath: obsidianPath,
-        imaSynced: imaSuccess,
+        localPath: obsidianPath,
+        errorMessage: success ? null : '请检查 Obsidian/ima 配置',
       );
 
       // 7. 通知 UI：收藏完成
@@ -173,7 +171,11 @@ class ShareReceiverService {
       ));
     } catch (e) {
       // 8. 异常处理
-      await _historyStore.updateStatus(record.id, 'failed');
+      await _historyStore.updateStatus(
+        record.id,
+        'failed',
+        errorMessage: '收藏失败：$e',
+      );
       _shareController.add(ShareEvent(
         url: url,
         title: title,
