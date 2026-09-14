@@ -142,9 +142,8 @@ class ShareReceiverService {
       try {
         if (await _imaService.isConfigured()) {
           final result = await _imaService.uploadMarkdown(
-            title: info.title,
+            fileName: '${info.title}.md',
             content: '来源：$url\n\n${info.content}',
-            sourceUrl: url,
           );
           imaSuccess = result.success;
         }
@@ -156,7 +155,7 @@ class ShareReceiverService {
       final success = obsidianPath != null || imaSuccess;
       await _historyStore.updateStatus(
         record.id,
-        success ? 'success' : 'failed',
+        status: success ? 'success' : 'failed',
         localPath: obsidianPath,
         errorMessage: success ? null : '请检查 Obsidian/ima 配置',
       );
@@ -173,7 +172,7 @@ class ShareReceiverService {
       // 8. 异常处理
       await _historyStore.updateStatus(
         record.id,
-        'failed',
+        status: 'failed',
         errorMessage: '收藏失败：$e',
       );
       _shareController.add(ShareEvent(

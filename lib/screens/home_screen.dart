@@ -8,7 +8,6 @@ import '../models/clip_record.dart';
 import '../models/feed_source.dart';
 import '../models/web_page_info.dart';
 import '../services/clip_history_store.dart';
-import '../services/clipboard_detector.dart';
 import '../services/ima_service.dart';
 import '../services/ios_share_bridge.dart';
 import '../services/obsidian_store.dart';

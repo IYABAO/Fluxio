@@ -14,7 +14,7 @@ class ClipboardDetector {
 
   /// URL 正则匹配（http/https）。
   static final _urlRegex = RegExp(
-    r'https?://[^\s<>"\'，。；\]\)]+',
+    'https?://[^\\s<>"\'\\]\\)]+',
     caseSensitive: false,
   );
 
