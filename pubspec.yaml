@@ -16,6 +16,10 @@ dependencies:
   webview_flutter: ^4.10.0
   # 本地键值存储（源列表持久化）
   shared_preferences: ^2.3.0
+  # 打开外部 URL（收藏历史中打开原文链接）
+  url_launcher: ^6.3.0
+  # HTTP 请求（从 URL 导入信息源）
+  http: ^1.2.0
   webview_flutter_windows: ^1.2.0
 
 dev_dependencies:

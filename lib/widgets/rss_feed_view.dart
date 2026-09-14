@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/feed_source.dart';
 import '../models/web_page_info.dart';
 import '../services/obsidian_store.dart';
+import '../services/read_history_store.dart';
 import '../services/rss_service.dart';
 
 /// RSS/Atom 订阅源的文章列表视图。
@@ -29,14 +30,35 @@ class RssFeedView extends StatefulWidget {
 class _RssFeedViewState extends State<RssFeedView> {
   final _rss = RssService();
   final _obsidian = ObsidianStore();
+  final _readHistory = ReadHistoryStore();
 
   List<RssArticle>? _articles;
   String? _error;
+  Set<String> _readUrls = {};
 
   @override
   void initState() {
     super.initState();
+    _loadReadHistory();
     _load();
+  }
+
+  /// 加载已读历史。
+  Future<void> _loadReadHistory() async {
+    final urls = await _readHistory.getAll();
+    if (mounted) setState(() => _readUrls = urls);
+  }
+
+  /// 判断文章是否已读。
+  bool _isRead(RssArticle article) {
+    return _readUrls.contains(_normalizeUrl(article.link));
+  }
+
+  /// 规范化 URL。
+  String _normalizeUrl(String url) {
+    var u = url.trim().toLowerCase();
+    if (u.endsWith('/')) u = u.substring(0, u.length - 1);
+    return u;
   }
 
   Future<void> _load() async {
@@ -144,11 +166,57 @@ class _RssFeedViewState extends State<RssFeedView> {
       separatorBuilder: (_, __) => const Divider(height: 1, indent: 16),
       itemBuilder: (ctx, index) {
         final a = articles[index];
+        final isRead = _isRead(a);
         return ListTile(
-          title: Text(
-            a.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+          title: Row(
+            children: [
+              // 已读标识：小圆点
+              if (isRead)
+                Container(
+                  width: 6,
+                  height: 6,
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: const BoxDecoration(
+                    color: Colors.grey,
+                    shape: BoxShape.circle,
+                  ),
+                )
+              else
+                Container(
+                  width: 6,
+                  height: 6,
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              Expanded(
+                child: Text(
+                  a.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: isRead ? FontWeight.normal : FontWeight.w600,
+                    color: isRead ? Colors.grey.shade600 : Colors.black87,
+                  ),
+                ),
+              ),
+              // 已读标签
+              if (isRead)
+                Container(
+                  margin: const EdgeInsets.only(left: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    '已读',
+                    style: TextStyle(fontSize: 10, color: Colors.grey),
+                  ),
+                ),
+            ],
           ),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -160,7 +228,10 @@ class _RssFeedViewState extends State<RssFeedView> {
                     a.summary!,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isRead ? Colors.grey.shade400 : Colors.grey,
+                    ),
                   ),
                 ),
               if (a.pubDate != null)
@@ -178,7 +249,16 @@ class _RssFeedViewState extends State<RssFeedView> {
             icon: const Icon(Icons.bookmark_add_outlined),
             onPressed: () => _save(a),
           ),
-          onTap: () => widget.onOpenArticle(a.link),
+          onTap: () async {
+            // 标记为已读
+            await _readHistory.markAsRead(a.link);
+            if (mounted) {
+              setState(() {
+                _readUrls.add(_normalizeUrl(a.link));
+              });
+            }
+            widget.onOpenArticle(a.link);
+          },
         );
       },
     );

@@ -1,11 +1,17 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import '../services/obsidian_store.dart';
+import '../models/clip_record.dart';
+import '../services/clip_history_store.dart';
 
-/// 收藏历史页：浏览 Obsidian 收件箱（Fluxio收件箱）里所有收藏文件，
-/// 点击用系统默认应用打开（Obsidian / 浏览器等）。
+/// 收藏历史页：统一显示 Obsidian 和 ima 两种方式的收藏记录。
+///
+/// - 每条记录显示来源标签（Obsidian / ima / Obsidian + ima）、状态、标题、时间
+/// - Obsidian 记录可点击打开本地文件
+/// - ima 记录可点击打开原文链接
+/// - 支持下拉刷新
 class ClipboardHistoryScreen extends StatefulWidget {
   const ClipboardHistoryScreen({super.key});
 
@@ -14,12 +20,10 @@ class ClipboardHistoryScreen extends StatefulWidget {
 }
 
 class _ClipboardHistoryScreenState extends State<ClipboardHistoryScreen> {
-  final _obsidian = ObsidianStore();
+  final _store = ClipHistoryStore();
 
-  String? _vaultPath;
-  List<FileSystemEntity> _files = [];
+  List<ClipRecord> _records = [];
   bool _loading = true;
-  String? _error;
 
   @override
   void initState() {
@@ -28,53 +32,42 @@ class _ClipboardHistoryScreenState extends State<ClipboardHistoryScreen> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() => _loading = true);
     try {
-      final vault = await _obsidian.getVaultPath();
-      if (vault == null || vault.isEmpty) {
-        setState(() {
-          _loading = false;
-          _error = '未配置 Obsidian vault 路径，请先在设置中配置';
-        });
-        return;
-      }
-      final dir = Directory('$vault${Platform.pathSeparator}${ObsidianStore.inboxDirName}');
-      final entries = dir.existsSync()
-          ? dir
-              .listSync()
-              .whereType<File>()
-              .where((f) =>
-                  f.path.endsWith('.md') ||
-                  f.path.endsWith('.html') ||
-                  f.path.endsWith('.htm'))
-              .toList()
-          : <File>[];
-      entries.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+      final records = await _store.getAll();
       setState(() {
-        _vaultPath = vault;
-        _files = entries;
+        _records = records;
         _loading = false;
       });
     } catch (e) {
-      setState(() {
-        _loading = false;
-        _error = '$e';
-      });
+      setState(() => _loading = false);
     }
   }
 
-  /// 用系统默认应用打开文件（Windows `start` / mac `open` / linux `xdg-open`）。
-  Future<void> _openFile(String path) async {
+  /// 打开收藏记录：Obsidian 打开本地文件，ima 打开原文链接。
+  Future<void> _openRecord(ClipRecord record) async {
+    // 如果有本地文件路径，优先打开本地文件
+    if (record.localPath != null && record.localPath!.isNotEmpty) {
+      try {
+        final file = File(record.localPath!);
+        if (await file.exists()) {
+          if (Platform.isWindows) {
+            await Process.start('cmd', ['/c', 'start', '', record.localPath!]);
+          } else if (Platform.isMacOS) {
+            await Process.start('open', [record.localPath!]);
+          } else {
+            await Process.start('xdg-open', [record.localPath!]);
+          }
+          return;
+        }
+      } catch (_) {}
+    }
+
+    // 否则打开原文链接
     try {
-      if (Platform.isWindows) {
-        await Process.start('cmd', ['/c', 'start', '', path]);
-      } else if (Platform.isMacOS) {
-        await Process.start('open', [path]);
-      } else {
-        await Process.start('xdg-open', [path]);
+      final uri = Uri.parse(record.url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
     } catch (e) {
       if (mounted) {
@@ -82,6 +75,28 @@ class _ClipboardHistoryScreenState extends State<ClipboardHistoryScreen> {
           SnackBar(content: Text('打开失败：$e')),
         );
       }
+    }
+  }
+
+  /// 删除一条收藏记录。
+  Future<void> _deleteRecord(ClipRecord record) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除收藏记录'),
+        content: Text('确定要删除「${record.title}」吗？\n（仅删除本地记录，不删除已保存的文件）'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _store.delete(record.id);
+      await _load();
     }
   }
 
@@ -106,72 +121,146 @@ class _ClipboardHistoryScreenState extends State<ClipboardHistoryScreen> {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.folder_off_outlined, size: 48, color: Colors.grey),
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.grey),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    if (_files.isEmpty) {
+    if (_records.isEmpty) {
       return const Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.inbox_outlined, size: 56, color: Colors.grey),
             SizedBox(height: 12),
-            Text('还没有收藏记录\n收藏网页后会出现在这里', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+            Text(
+              '还没有收藏记录\n收藏网页后会出现在这里',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey),
+            ),
           ],
         ),
       );
     }
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Text(
-            '收件箱：${_vaultPath}${Platform.pathSeparator}${ObsidianStore.inboxDirName}',
-            style: const TextStyle(fontSize: 12, color: Colors.grey),
-          ),
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.builder(
+        itemCount: _records.length,
+        itemBuilder: (ctx, index) {
+          final record = _records[index];
+          return _buildRecordTile(record);
+        },
+      ),
+    );
+  }
+
+  Widget _buildRecordTile(ClipRecord record) {
+    final isPending = record.status == 'pending';
+    final isFailed = record.status == 'failed';
+    final isSuccess = record.status == 'success';
+
+    // 状态颜色和图标
+    Color statusColor;
+    IconData statusIcon;
+    String statusText;
+    if (isPending) {
+      statusColor = Colors.orange;
+      statusIcon = Icons.hourglass_empty;
+      statusText = '保存中';
+    } else if (isFailed) {
+      statusColor = Colors.red;
+      statusIcon = Icons.error_outline;
+      statusText = '失败';
+    } else {
+      statusColor = Colors.green;
+      statusIcon = Icons.check_circle_outline;
+      statusText = '已完成';
+    }
+
+    // 来源标签颜色
+    Color sourceColor;
+    if (record.source.contains('ima') && record.source.contains('Obsidian')) {
+      sourceColor = Colors.purple;
+    } else if (record.source.contains('ima')) {
+      sourceColor = Colors.blue;
+    } else {
+      sourceColor = Colors.teal;
+    }
+
+    return Dismissible(
+      key: Key(record.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: Colors.red,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (_) => _deleteRecord(record),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: statusColor.withOpacity(0.1),
+          child: Icon(statusIcon, color: statusColor, size: 20),
         ),
-        const Divider(height: 1),
-        Expanded(
-          child: ListView.builder(
-            itemCount: _files.length,
-            itemBuilder: (ctx, index) {
-              final f = _files[index];
-              final name = f.path.split(Platform.pathSeparator).last;
-              final base = name.endsWith('.html') || name.endsWith('.htm')
-                  ? name.substring(0, name.length - 5)
-                  : name.substring(0, name.length - 3);
-              final modified = f.statSync().modified;
-              final isHtml = name.endsWith('.html') || name.endsWith('.htm');
-              return ListTile(
-                leading: Icon(
-                  isHtml ? Icons.language : Icons.description_outlined,
-                  color: isHtml ? Colors.blue : Colors.green,
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                record.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: sourceColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                record.source,
+                style: TextStyle(fontSize: 10, color: sourceColor),
+              ),
+            ),
+          ],
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 2),
+            Text(
+              record.url,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Text(
+                  _fmt(record.createdAt),
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
                 ),
-                title: Text(base, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text(_fmt(modified)),
-                trailing: const Icon(Icons.open_in_new, size: 18, color: Colors.grey),
-                onTap: () => _openFile(f.path),
-              );
-            },
-          ),
+                const SizedBox(width: 8),
+                Text(
+                  statusText,
+                  style: TextStyle(fontSize: 11, color: statusColor),
+                ),
+                if (isFailed && record.errorMessage != null) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      record.errorMessage!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, color: Colors.red),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
         ),
-      ],
+        trailing: const Icon(Icons.open_in_new, size: 18, color: Colors.grey),
+        onTap: () => _openRecord(record),
+      ),
     );
   }
 

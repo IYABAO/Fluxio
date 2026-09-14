@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../main.dart' show inboxServer;
+import '../models/clip_record.dart';
 import '../models/feed_source.dart';
 import '../models/web_page_info.dart';
+import '../services/clip_history_store.dart';
 import '../services/ima_service.dart';
 import '../services/obsidian_store.dart';
 import '../services/source_store.dart';
@@ -29,6 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _store = SourceStore();
   final _obsidianStore = ObsidianStore();
   final _imaService = ImaService();
+  final _clipHistoryStore = ClipHistoryStore();
 
   List<FeedSource> _sources = [];
   bool _loading = true;
@@ -153,10 +156,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// 收藏当前 Tab 页面到 Obsidian。
+  /// 收藏当前 Tab 页面到 Obsidian / ima。
   ///
   /// 会先实时提取当前页面正文，把内容详情写入 Markdown；
   /// 提取失败时回退为仅收藏链接。
+  /// Obsidian 和 ima 独立工作，至少配置一个即可收藏。
   Future<void> _saveCurrentToObsidian() async {
     if (_saving || _activeSources.isEmpty) return;
     final source = _activeSources[_currentIndex];
@@ -180,12 +184,29 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // 判断是否是列表页（当前 URL 等于信息源首页 URL）
+    final isListPage = _isSameUrl(info.url, source.url);
+    if (isListPage) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('请先打开文章详情再收藏（列表页不支持收藏）'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    // 检查是否至少配置了一个收藏目标（Obsidian 或 ima）
     final vaultPath = await _obsidianStore.getVaultPath();
-    if (vaultPath == null || vaultPath.isEmpty) {
+    final obsidianConfigured = vaultPath != null && vaultPath.isNotEmpty;
+    final imaEnabled = await _imaService.getEnabled();
+    final imaConfigured = imaEnabled && await _imaService.isConfigured();
+
+    if (!obsidianConfigured && !imaConfigured) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('请先配置 Obsidian vault 路径'),
+            content: const Text('请先在设置中配置 Obsidian vault 路径或 ima 知识库'),
             action: SnackBarAction(
               label: '去设置',
               onPressed: _openSettings,
@@ -208,35 +229,135 @@ class _HomeScreenState extends State<HomeScreen> {
         html: html,
       );
 
-      final files = await _obsidianStore.saveClip(
-        enriched,
-        sourceTitle: source.title,
+      // 确定收藏来源标签
+      final sourceLabel = obsidianConfigured && imaConfigured
+          ? 'Obsidian + ima'
+          : obsidianConfigured
+              ? 'Obsidian'
+              : 'ima';
+
+      // 1. 立即创建 pending 状态的收藏记录
+      final recordId = ClipHistoryStore.generateId();
+      final record = ClipRecord(
+        id: recordId,
+        title: info.title.isEmpty ? info.url : info.title,
+        url: info.url,
+        source: sourceLabel,
+        status: 'pending',
+        createdAt: DateTime.now(),
       );
+      await _clipHistoryStore.add(record);
 
-      // 异步同步到 ima 知识库（不阻塞 Obsidian 收藏反馈）
-      _syncToIma(enriched, source.title);
-
+      // 2. 立即显示"已加入收藏队列"
       if (mounted) {
-        final hasHtml = html != null && html.isNotEmpty;
-        final dirPath = files.first.parent.path;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              hasHtml
-                  ? '已收藏：完整网页快照 + Markdown 摘要 → $dirPath'
-                  : '已收藏（仅链接）→ $dirPath',
-            ),
+            content: Text('已加入收藏队列，正在后台保存到 $sourceLabel...'),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
+
+      // 3. 后台静默执行保存和同步
+      unawaited(_executeClipSave(
+        record: record,
+        recordId: recordId,
+        enriched: enriched,
+        sourceTitle: source.title,
+        obsidianConfigured: obsidianConfigured,
+        imaConfigured: imaConfigured,
+      ));
     } catch (e) {
       if (mounted) {
+        setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('收藏失败：$e')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// 判断两个 URL 是否相同（忽略末尾斜杠和大小写）。
+  bool _isSameUrl(String url1, String url2) {
+    String normalize(String url) {
+      var u = url.trim().toLowerCase();
+      if (u.endsWith('/')) u = u.substring(0, u.length - 1);
+      return u;
+    }
+    return normalize(url1) == normalize(url2);
+  }
+
+  /// 判断当前 Tab 是否在列表页（首页）。
+  bool _isCurrentListPage() {
+    if (_activeSources.isEmpty) return true;
+    final source = _activeSources[_currentIndex];
+    final info = _pageInfos[source.id];
+    if (info == null || info.url.isEmpty) return true;
+    return _isSameUrl(info.url, source.url);
+  }
+
+  /// 后台执行收藏保存（Obsidian + ima），更新收藏记录状态。
+  Future<void> _executeClipSave({
+    required ClipRecord record,
+    required String recordId,
+    required WebPageInfo enriched,
+    required String sourceTitle,
+    required bool obsidianConfigured,
+    required bool imaConfigured,
+  }) async {
+    String? localPath;
+    String? errorMsg;
+    var successCount = 0;
+
+    // 保存到 Obsidian
+    if (obsidianConfigured) {
+      try {
+        final files = await _obsidianStore.saveClip(enriched, sourceTitle: sourceTitle);
+        localPath = files.first.parent.path;
+        successCount++;
+      } catch (e) {
+        errorMsg = 'Obsidian保存失败: $e';
+      }
+    }
+
+    // 同步到 ima
+    if (imaConfigured) {
+      try {
+        await _syncToIma(enriched, sourceTitle);
+        successCount++;
+      } catch (e) {
+        errorMsg = (errorMsg == null ? '' : '$errorMsg; ') + 'ima同步失败: $e';
+      }
+    }
+
+    // 更新收藏记录状态
+    final status = successCount > 0 ? 'success' : 'failed';
+    await _clipHistoryStore.updateStatus(
+      recordId,
+      status: status,
+      localPath: localPath,
+      errorMessage: errorMsg,
+    );
+
+    if (mounted) {
+      setState(() => _saving = false);
+      if (successCount > 0) {
+        final target = obsidianConfigured && imaConfigured
+            ? 'Obsidian + ima'
+            : obsidianConfigured
+                ? 'Obsidian'
+                : 'ima';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('收藏完成：已保存到 $target${localPath != null ? ' → $localPath' : ''}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('收藏失败：$errorMsg'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -428,17 +549,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 onPressed: _backToFeed,
               ),
-              IconButton(
-                tooltip: '收藏到 Obsidian',
-                icon: const Icon(Icons.bookmark_add_outlined, size: 20),
-                style: IconButton.styleFrom(
-                  backgroundColor: const Color(0xFF0D9488),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.all(8),
-                  minimumSize: const Size(36, 36),
+              // 收藏按钮只在详情页显示，列表页隐藏
+              if (!_isCurrentListPage())
+                IconButton(
+                  tooltip: '收藏到 Obsidian / ima',
+                  icon: const Icon(Icons.bookmark_add_outlined, size: 20),
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xFF0D9488),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.all(8),
+                    minimumSize: const Size(36, 36),
+                  ),
+                  onPressed: _saveCurrentToObsidian,
                 ),
-                onPressed: _saveCurrentToObsidian,
-              ),
               IconButton(
                 tooltip: '收藏历史',
                 icon: const Icon(Icons.history, size: 20),

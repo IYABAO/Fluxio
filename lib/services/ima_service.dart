@@ -87,7 +87,7 @@ class ImaService {
     try {
       final req = await client.postUrl(uri);
       _headers(clientId, apiKey).forEach((k, v) => req.headers.add(k, v));
-      req.add(utf8.encode(jsonEncode({'query': '', 'cursor': '', 'limit': 50})));
+      req.add(utf8.encode(jsonEncode({'query': '', 'cursor': '', 'limit': 20})));
       final resp = await req.close();
       final body = await resp.transform(utf8.decoder).join();
       final data = jsonDecode(body);

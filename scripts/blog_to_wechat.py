@@ -49,7 +49,7 @@ h3 { font-size: 18px; font-weight: bold; margin: 24px 0 12px; color: #333; }
 h4 { font-size: 16px; font-weight: bold; margin: 20px 0 10px; color: #555; }
 
 /* 段落 */
-p { margin: 16px 0; text-align: justify; }
+p { margin: 16px 0; }
 
 /* 图片 */
 img { max-width: 100%; height: auto; display: block; margin: 20px auto; border-radius: 8px; }
@@ -69,7 +69,7 @@ li { margin: 8px 0; }
 
 /* 表格 */
 table { border-collapse: collapse; width: 100%; margin: 20px 0; font-size: 14px; }
-th, td { border: 1px solid #ddd; padding: 10px 12px; text-align: left; }
+th, td { border: 1px solid #ddd; padding: 10px 12px; }
 th { background: #f7f7f7; font-weight: bold; color: #333; }
 tr:nth-child(even) { background: #fafafa; }
 
@@ -173,6 +173,30 @@ def fetch_article(url: str) -> Optional[dict]:
                         img.style.borderRadius = '8px';
                         svg.replaceWith(img);
                     }
+                });
+
+                // 彻底清理所有可能导致公众号警告的内联样式
+                content.querySelectorAll('*').forEach(el => {
+                    if (!el.style) return;
+                    // 1. 移除所有 text-align（公众号会自动转成 start，导致警告）
+                    el.style.removeProperty('text-align');
+                    // 2. 移除所有宽度设置（可能导致溢出或居中不一致）
+                    el.style.removeProperty('width');
+                    el.style.removeProperty('max-width');
+                    el.style.removeProperty('min-width');
+                    // 3. 移除过大的左侧缩进（可能导致溢出）
+                    const marginLeft = parseFloat(el.style.marginLeft);
+                    if (marginLeft > 50) el.style.removeProperty('margin-left');
+                    const paddingLeft = parseFloat(el.style.paddingLeft);
+                    if (paddingLeft > 50) el.style.removeProperty('padding-left');
+                    // 4. 移除 position（可能破坏排版顺序）
+                    el.style.removeProperty('position');
+                    el.style.removeProperty('left');
+                    el.style.removeProperty('right');
+                    el.style.removeProperty('top');
+                    el.style.removeProperty('bottom');
+                    // 5. 移除 transform（可能导致显示异常）
+                    el.style.removeProperty('transform');
                 });
 
                 return content.innerHTML;

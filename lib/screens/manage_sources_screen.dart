@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/feed_source.dart';
+import '../models/preset_sources.dart';
+import '../services/remote_source_importer.dart';
 import '../services/source_store.dart';
 
 /// 源管理页：添加 / 编辑 / 删除 / 启停 / 分组筛选 / 排序。
@@ -54,6 +56,275 @@ class _ManageSourcesScreenState extends State<ManageSourcesScreen> {
     final filter = _groupFilter;
     if (filter == null) return _sources;
     return _sources.where((s) => s.group == filter).toList();
+  }
+
+  /// 弹出一键导入确认对话框。
+  Future<void> _showImportDialog() async {
+    final presetCount = PresetSources.count;
+    final groups = PresetSources.groups;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.download_outlined, color: Colors.teal),
+            SizedBox(width: 8),
+            Text('一键导入常用信息源'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '将导入 $presetCount 个常用信息源，按以下分组：',
+                style: const TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 12),
+              ...groups.map((g) {
+                final count = PresetSources.byGroup[g]!.length;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.folder_outlined, size: 16, color: Colors.grey),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(g, style: const TextStyle(fontSize: 13))),
+                      Text('$count 个', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    ],
+                  ),
+                );
+              }),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.teal.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.teal.withOpacity(0.2)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: Colors.teal),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '相同 URL 的源将覆盖更新（保留启用状态），不同 URL 的源将增量添加。不会删除您已有的源。',
+                        style: TextStyle(fontSize: 12, color: Colors.teal),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.download),
+            label: const Text('开始导入'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true && mounted) {
+      await _importPresets();
+    }
+  }
+
+  /// 执行一键导入。
+  Future<void> _importPresets() async {
+    // 显示加载中
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('正在导入信息源...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final result = await widget.store.importPresets();
+      if (mounted) {
+        Navigator.pop(context); // 关闭加载对话框
+        await _reload();
+        // 显示导入结果
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('导入完成：新增 ${result.added} 个，覆盖 ${result.updated} 个，共 ${result.total} 个源'),
+            duration: const Duration(seconds: 4),
+            backgroundColor: Colors.teal,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // 关闭加载对话框
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导入失败：$e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  /// 弹出从 URL 导入的对话框。
+  Future<void> _showUrlImportDialog() async {
+    final urlCtrl = TextEditingController(
+      text: 'https://raw.githubusercontent.com/IYABAO/Fluxio/refs/heads/main/README.md',
+    );
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.link, color: Colors.teal),
+            SizedBox(width: 8),
+            Text('从 URL 导入信息源'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '输入包含信息源列表的文件 URL，支持 JSON 和 Markdown 格式。',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: urlCtrl,
+                decoration: const InputDecoration(
+                  labelText: '文件 URL',
+                  hintText: 'https://example.com/sources.json',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.grey.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('支持的格式：', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 6),
+                    Text(
+                      'JSON:\n[{"title":"...","url":"...","group":"...","type":"web"}]',
+                      style: TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      'Markdown:\n## 分组名\n- [标题](URL)',
+                      style: TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              final url = urlCtrl.text.trim();
+              if (url.isEmpty) return;
+              Navigator.pop(ctx, url);
+            },
+            icon: const Icon(Icons.download),
+            label: const Text('开始导入'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && mounted) {
+      await _importFromUrl(result);
+    }
+  }
+
+  /// 从 URL 导入信息源。
+  Future<void> _importFromUrl(String url) async {
+    // 显示加载中
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('正在下载并解析...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      // 下载并解析
+      final sources = await RemoteSourceImporter.importFromUrl(url);
+
+      if (sources.isEmpty) {
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('未解析到任何信息源，请检查文件格式'), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
+
+      // 执行导入
+      final result = await widget.store.importSources(sources);
+
+      if (mounted) {
+        Navigator.pop(context); // 关闭加载对话框
+        await _reload();
+        // 显示导入结果
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '导入完成：解析到 ${sources.length} 个，新增 ${result.added} 个，覆盖 ${result.updated} 个，共 ${result.total} 个源',
+            ),
+            duration: const Duration(seconds: 5),
+            backgroundColor: Colors.teal,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // 关闭加载对话框
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导入失败：$e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   /// 弹出添加对话框（类型 / 名称 / URL / 分组）。
@@ -251,7 +522,44 @@ class _ManageSourcesScreenState extends State<ManageSourcesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('信息源管理')),
+      appBar: AppBar(
+        title: const Text('信息源管理'),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: '导入信息源',
+            icon: const Icon(Icons.download_outlined),
+            onSelected: (value) {
+              if (value == 'preset') {
+                _showImportDialog();
+              } else if (value == 'url') {
+                _showUrlImportDialog();
+              }
+            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                value: 'preset',
+                child: Row(
+                  children: [
+                    Icon(Icons.star_outline, size: 20),
+                    SizedBox(width: 12),
+                    Text('导入预设源（22个常用源）'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'url',
+                child: Row(
+                  children: [
+                    Icon(Icons.link, size: 20),
+                    SizedBox(width: 12),
+                    Text('从 URL 导入（自定义源列表）'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddDialog,
         tooltip: '添加信息源',

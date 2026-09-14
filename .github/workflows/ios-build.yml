@@ -1,0 +1,100 @@
+name: iOS Build
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'lib/**'
+      - 'ios/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/ios-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    name: Build iOS
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: arm64
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Build iOS (unsigned)
+        run: |
+          flutter build ios --release --no-codesign
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/
+          zip -r Fluxio-unsigned.ipa Payload
+          rm -rf Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxio-ios-unsigned
+          path: build/ios/iphoneos/Fluxio-unsigned.ipa
+          retention-days: 30
+
+      - name: Upload APP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxio-ios-app
+          path: build/ios/iphoneos/Runner.app
+          retention-days: 30
+
+  build-ios-signed:
+    name: Build iOS (Signed)
+    runs-on: macos-latest
+    if: ${{ secrets.IOS_CERTIFICATE != '' }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: arm64
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Import Code-Signing Certificates
+        uses: apple-actions/import-codesign-certs@v2
+        with:
+          p12-file-base64: ${{ secrets.IOS_CERTIFICATE }}
+          p12-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+
+      - name: Download Provisioning Profile
+        run: |
+          echo "${{ secrets.IOS_PROVISIONING_PROFILE }}" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/Fluxio.mobileprovision
+
+      - name: Build iOS (signed)
+        run: |
+          flutter build ios --release \
+            --export-options-plist=ios/ExportOptions.plist
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/
+          zip -r Fluxio-signed.ipa Payload
+          rm -rf Payload
+
+      - name: Upload Signed IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxio-ios-signed
+          path: build/ios/iphoneos/Fluxio-signed.ipa
+          retention-days: 90
