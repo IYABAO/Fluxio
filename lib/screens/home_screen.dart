@@ -603,6 +603,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           body: TabBarView(
+            // 禁用水平滑动，避免与内层 ListView 垂直滑动手势冲突
+            // 用户通过点击顶部 TabBar 切换数据源
+            physics: const NeverScrollableScrollPhysics(),
             children: sources
                 .map((s) => SourceWebView(
                       source: s,
