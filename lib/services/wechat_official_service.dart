@@ -82,7 +82,7 @@ class WechatOfficialService {
 
       final data = jsonDecode(resp.body);
       final token = data['access_token'];
-      final expiresIn = data['expires_in'] ?? 7200;
+      final expiresIn = (data['expires_in'] ?? 7200) as int;
 
       if (token is String && token.isNotEmpty) {
         final prefs = await _sp;
