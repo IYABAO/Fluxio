@@ -138,6 +138,102 @@ class PresetSources {
       url: 'https://www.v2ex.com/',
       group: '独立开发',
     ),
+
+    // ========== 热榜聚合 ==========
+    FeedSource(
+      id: 'preset-tophub',
+      title: 'TopHub 今日热榜',
+      url: 'https://tophub.today',
+      group: '热榜聚合',
+    ),
+    FeedSource(
+      id: 'preset-buzzing',
+      title: 'Buzzing 首页',
+      url: 'https://buzzing.cc',
+      group: '热榜聚合',
+    ),
+    FeedSource(
+      id: 'preset-newsnow',
+      title: 'NewsNow',
+      url: 'https://newsnow.busiyi.world',
+      group: '热榜聚合',
+    ),
+    FeedSource(
+      id: 'preset-rebang-today',
+      title: 'rebang.today 今日热榜',
+      url: 'https://rebang.today',
+      group: '热榜聚合',
+    ),
+    FeedSource(
+      id: 'preset-tgmeng',
+      title: '糖果梦热榜',
+      url: 'https://tgmeng.com',
+      group: '热榜聚合',
+    ),
+    FeedSource(
+      id: 'preset-newshub',
+      title: 'NewsHub',
+      url: 'https://newshub.shenzjd.com',
+      group: '热榜聚合',
+    ),
+    FeedSource(
+      id: 'preset-huashuimoyu',
+      title: '划水摸鱼',
+      url: 'https://huashuimoyu.com',
+      group: '热榜聚合',
+    ),
+    FeedSource(
+      id: 'preset-remoshuang',
+      title: '热摸爽',
+      url: 'https://remoshuang.com',
+      group: '热榜聚合',
+    ),
+
+    // ========== Buzzing 子站 ==========
+    FeedSource(
+      id: 'preset-buzzing-hn',
+      title: 'HN 热门 (Buzzing)',
+      url: 'https://hn.buzzing.cc',
+      group: 'Buzzing 子站',
+    ),
+    FeedSource(
+      id: 'preset-buzzing-news',
+      title: '国外新闻头条 (Buzzing)',
+      url: 'https://news.buzzing.cc',
+      group: 'Buzzing 子站',
+    ),
+
+    // ========== 国外双语 ==========
+    FeedSource(
+      id: 'preset-threadeast',
+      title: 'ThreadEast 中国趋势英译',
+      url: 'https://threadeast.xyz',
+      group: '国外双语',
+    ),
+    FeedSource(
+      id: 'preset-horizon-ai',
+      title: 'Horizon AI 新闻雷达',
+      url: 'https://thysrael.github.io/Horizon/',
+      group: '国外双语',
+    ),
+    FeedSource(
+      id: 'preset-ground-news',
+      title: 'Ground News',
+      url: 'https://ground.news',
+      group: '国外双语',
+    ),
+    FeedSource(
+      id: 'preset-feedly',
+      title: 'Feedly',
+      url: 'https://feedly.com',
+      group: '国外双语',
+    ),
+    FeedSource(
+      id: 'preset-inoreader',
+      title: 'Inoreader',
+      url: 'https://www.inoreader.com',
+      group: '国外双语',
+    ),
   ];
 
   /// 按分组获取预设源。
