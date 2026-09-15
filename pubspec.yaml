@@ -21,6 +21,12 @@ dependencies:
   # HTTP 请求（从 URL 导入信息源）
   http: ^1.2.0
   webview_flutter_windows: ^1.2.0
+  # Markdown 渲染（文件阅读器）
+  flutter_markdown_plus: ^1.0.12
+  # 代码高亮（Markdown 代码块）
+  flutter_highlight: ^0.7.0
+  # 文件选择器（打开本地 .md/.html 文件）
+  file_picker: ^8.0.0
 
 dev_dependencies:
   flutter_test:

@@ -2,9 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../models/clip_record.dart';
 import '../services/clip_history_store.dart';
+import 'file_reader_screen.dart';
 
 /// 收藏历史页：统一显示 Obsidian 和 ima 两种方式的收藏记录。
 ///
@@ -107,6 +109,11 @@ class _ClipboardHistoryScreenState extends State<ClipboardHistoryScreen> {
         title: const Text('收藏历史'),
         actions: [
           IconButton(
+            tooltip: '打开文件',
+            icon: const Icon(Icons.folder_open),
+            onPressed: _openFile,
+          ),
+          IconButton(
             tooltip: '刷新',
             icon: const Icon(Icons.refresh),
             onPressed: _load,
@@ -115,6 +122,36 @@ class _ClipboardHistoryScreenState extends State<ClipboardHistoryScreen> {
       ),
       body: _buildBody(),
     );
+  }
+
+  /// 打开本地文件（.md / .html），用 Fluxio 阅读器打开。
+  Future<void> _openFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['md', 'markdown', 'html', 'htm', 'txt'],
+        dialogTitle: '选择要打开的文件',
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final filePath = result.files.first.path;
+        if (filePath != null && filePath.isNotEmpty) {
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => FileReaderScreen(filePath: filePath),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('打开文件失败：$e')),
+        );
+      }
+    }
   }
 
   Widget _buildBody() {
